@@ -12,6 +12,10 @@ struct Vec {        // Usage: time ./smallpt 5000 && xv image.ppm
   double dot(const Vec &b) const { return x*b.x+y*b.y+z*b.z; } // cross:
   Vec operator%(Vec&b){return Vec(y*b.z-z*b.y,z*b.x-x*b.z,x*b.y-y*b.x);}
 };
+struct NormalsAndVec { // Yay readable type!
+	Vec pos, min, max;
+	NormalsAndVec(Vec pos_ = Vec(0,0,0),Vec min_ = Vec(0,0,0), Vec max_ = Vec(0,0,0)){pos = pos_; min = min_; max = max_;}
+};
 struct Ray { 
   Vec o, d; //origin, direction
   Ray(Vec o_, Vec d_) : o(o_), d(d_) {} //Makes o = first argument, etc (Constructor!)
@@ -98,9 +102,18 @@ z = z - 1;
 z = (z-columns/2)/(columns/2);
 return Vec(x,y,z); // x, y, and z are from 0-1
 }
-
-Vec cubeCam(double delta, double columnz) {
+NormalsAndVec cubeCamVertical(double delta, double columnz, bool top) {
+// Delta will be columnz^2
 double x, y, z;
+z = floor(delta/columnz);
+y = top ? 1 : -1;
+x = -1 + (2/columnz)*(delta-z)/columnz;
+z = -1 + (2/columnz)*z;
+return NormalsAndVec(Vec(x, y, z),Vec(-90,-90,-90),Vec(90,90,90));
+}
+NormalsAndVec cubeCam(double delta, double columnz) {
+double x, y, z;
+Vec min, max;
 double columns = columnz*4;
 double il = floor(delta/columns); // i = row
 double d = 2/columnz; // distance between columns
@@ -111,6 +124,8 @@ y = 1-(il*d);
 if (l < (columnz)) {
 x = (d*mult)-1;
 z = 1;
+min = Vec(-90,-90,0);
+max = Vec(-90,-90,0);
 } else if (l < (columnz*2)) {
 x = 1;
 z = 1-(d*mult);
@@ -129,13 +144,18 @@ Vec rayAngles(double delta, double columnz, Vec min, Vec max) {
 double x, y, z;
 double il = floor(delta/(columnz*columnz)); // i = row
 double d = 2/columnz; // distance between columns
-double l = delta - (il*columnz); // leftover delta after vertical scan
-double ol = floor(l/columnz);
-fprintf(stderr,"\r\n%f %f %f",il);
-x = 1-(il*d);
-y = 1-(il*d);
-z = 1-(il*d);
-double mult = delta - (ol*columnz) - (il*columnz);
+
+//x = sin (vertical angle) * cos( floor angle)
+//y = sin (vert) * sin(hor)
+//z = cos (vert)
+// Delta will be columnz^2
+y = floor(delta/columnz);
+x = min.x + (max.x/columnz)*((delta-y)/columnz)*2;
+y = min.y + (max.y/columnz)*y*2;
+//fprintf(stderr,"\r\n%f %f %f",x, y,(max.y/columnz)*floor(delta/columnz)*2);
+x = sin (y) * cos(x);
+y = sin (y) * sin(x);
+z = cos (y);
 return Vec(x,y,z);
 }
 int mainold(int argc, char *argv[]){
@@ -166,40 +186,29 @@ int mainold(int argc, char *argv[]){
 bool vecEquals(Vec a, Vec b) {
 return ((a.x == b.x) && (a.y == b.y) && (a.z == b.z));
 }
-int mainoldold(int argc, char *argv[]){
-	int columns = argc==2 ? atoi(argv[1]) : 5;
-	int multiplier = columns*columns;
-	int sq = multiplier * multiplier;
-	RenderedRay *c = new RenderedRay[multiplier*multiplier];
-	for (int i=0; i < multiplier; i++) {
-		unsigned short Xi[3]={0,0,i*i*i};
-		Vec st = cubeCam(i,columns);
-		for (int p=0; p < multiplier; p++) {
-			Vec sp = cubeCam(p,columns);
-			c[(i*multiplier)+p] = RenderedRay(st,sp,radiance(Ray(Vec(st.x*200,st.y*200,st.z*200) + Vec(50,52,295.6),sp),0,Xi));
-		}
-		fprintf(stderr,"\rRendering (Multiplier: %d) %5.2f%%",multiplier,100.*i/(multiplier - 1));
-	}
-	FILE *f = fopen("sphere.prm", "w"); // Write image to Portable Raymap file.
-	fprintf(f, "R1\n%d", multiplier); // Line 1: Portable Raymap Type Identifier, Line 2: Portable Raymap Ray Multiplier
-	Vec last = Vec(9,9,9);
-	for (int i=0; i<multiplier*multiplier; i++){
-			if (vecEquals(c[i].o,last) == false){
-				last = c[i].o;
-				fprintf(f,"\n%f %f %f\n", c[i].o.x, c[i].o.y, c[i].o.z/columns);
-			}
-		fprintf(f,"%f %f %f %d %d %d ", c[i].d.x, c[i].d.y, c[i].d.z, toInt(c[i].c.x), toInt(c[i].c.y), toInt(c[i].c.z));
-	}
-}
 int main(int argc, char *argv[]) {
 // Each face of cube has columns^2 points on it)
 int columns = argc==2 ? atoi(argv[1]) : 5;
 	int multiplier = columns*columns*4;
-	int max = columns*columns*6;
-	Vec *points = new Vec[columns*columns*6];
-for (int i=0; i < columns*columns; i++) {
+	int maxpoints = columns*columns*6;
+	int maxrays = (pow(columns,4))*6;
+	Vec *rays = new Vec[maxrays];
+	FILE *f = fopen("test.prm", "w"); // Write image to Portable Raymap file.
+	fprintf(f, "R1\n%d\n",columns); // Line 1: Portable Raymap Type Identifier, Line 2: Portable Raymap Ray Multiplier
+for (int i=0; i < pow(columns,4); i++) { 
 	unsigned short Xi[3]={0,0,i*i*i};
-	Vec st = rayAngles(i,columns,Vec(-1,-1,-1),Vec(1,1,1));
-	fprintf(stderr,"\r\nRendering (Multiplier: %d) %f %f %f",i,st.x,st.y,st.z);
-	}
+	NormalsAndVec top = cubeCamVertical(i,columns,true);
+	Vec raydir = rayAngles(i,columns,top.min,top.max);
+	top.pos = top.pos*100;
+	top.pos = top.pos + Vec(50,52,295.6);
+	rays[i] = radiance(Ray(top.pos,raydir.norm()),0,Xi);
+	//columns*columns
+	fprintf(stderr,"\rRendering (%f %f %f points per face) %5.2f%%",raydir.x,raydir.y,raydir.z,100.*((i+1)/pow(columns,4)));
+	fprintf(f,"%d %d %d ", toInt(rays[i].x), toInt(rays[i].y), toInt(rays[i].z));
+} // This is just the top face, trying to confirm it works before doing the other faces.
+// Final file saving code goes here
+//FILE *f = fopen("image.ppm", "w");         // Write image to PPM file.
+//  fprintf(f, "P3\n%d %d\n%d\n", w, h, 255);
+//  for (int i=0; i<columns*columns; i++)
+//    fprintf(f,"%d %d %d ", toInt(c[i].x), toInt(c[i].y), toInt(c[i].z));
 }
