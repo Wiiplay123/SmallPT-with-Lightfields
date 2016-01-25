@@ -1,6 +1,9 @@
 #include <math.h>   // smallpt, a Path Tracer by Kevin Beason, 2008
 #include <stdlib.h> // Make : g++ -O3 -fopenmp smallpt.cpp -o smallpt
 #include <stdio.h>  //        Remove "-fopenmp" for g++ version < 4.2
+#include <iostream>
+#include <fstream>
+using namespace std;
 struct Vec {        // Usage: time ./smallpt 5000 && xv image.ppm
   double x, y, z;                  // position, also color (r,g,b)
   Vec(double x_=0, double y_=0, double z_=0){ x=x_; y=y_; z=z_; }
@@ -103,12 +106,12 @@ z = (z-columns/2)/(columns/2);
 return Vec(x,y,z); // x, y, and z are from 0-1
 }
 NormalsAndVec cubeCamVertical(double delta, double columnz, bool top) {
-// Delta will be columnz^2
+// Delta will go up to columnz^2
 double x, y, z;
 z = floor(delta/columnz);
 y = top ? 1 : -1;
-x = -1 + (2/columnz)*(delta-z)/columnz;
-z = -1 + (2/columnz)*z;
+x = -1 + (2/columnz)*(delta-z)/columnz/columnz/columnz;
+z = -1 + (2/columnz)*(z/columnz/columnz);
 return NormalsAndVec(Vec(x, y, z),Vec(-90,-90,-90),Vec(90,90,90));
 }
 NormalsAndVec cubeCam(double delta, double columnz) {
@@ -187,28 +190,40 @@ bool vecEquals(Vec a, Vec b) {
 return ((a.x == b.x) && (a.y == b.y) && (a.z == b.z));
 }
 int main(int argc, char *argv[]) {
+int progress = 0;
 // Each face of cube has columns^2 points on it)
 int columns = argc==2 ? atoi(argv[1]) : 5;
 	int multiplier = columns*columns*4;
 	int maxpoints = columns*columns*6;
-	int maxrays = (pow(columns,4))*6;
-	Vec *rays = new Vec[maxrays];
+	int maxrays = (pow(columns,4));
 	FILE *f = fopen("test.prm", "w"); // Write image to Portable Raymap file.
 	fprintf(f, "R1\n%d\n",columns); // Line 1: Portable Raymap Type Identifier, Line 2: Portable Raymap Ray Multiplier
-for (int i=0; i < pow(columns,4); i++) { 
+	for (int o=0; o < columns*columns; o++) {
+	Vec *rays = new Vec[columns*columns];
+Vec raydir = Vec(0,0,0);
+NormalsAndVec top = NormalsAndVec(Vec(0,0,0),Vec(0,0,0),Vec(0,0,0));
+	#pragma omp parallel for schedule(dynamic, 1) private(raydir,top)       // OpenMP
+	for (int i=0; i < columns*columns; i++) { 
 	unsigned short Xi[3]={0,0,i*i*i};
 	NormalsAndVec top = cubeCamVertical(i,columns,true);
-	Vec raydir = rayAngles(i,columns,top.min,top.max);
+	raydir = rayAngles(i,columns,top.min,top.max);
+	//fprintf(stderr,"\r\n%f %f %f",top.pos.x, top.pos.y, top.pos.z);
 	top.pos = top.pos*100;
 	top.pos = top.pos + Vec(50,52,295.6);
 	rays[i] = radiance(Ray(top.pos,raydir.norm()),0,Xi);
 	//columns*columns
-	fprintf(stderr,"\rRendering (%f %f %f points per face) %5.2f%%",raydir.x,raydir.y,raydir.z,100.*((i+1)/pow(columns,4)));
-	fprintf(f,"%d %d %d ", toInt(rays[i].x), toInt(rays[i].y), toInt(rays[i].z));
-} // This is just the top face, trying to confirm it works before doing the other faces.
+	
+	}
+for (int i=0; i < columns*columns; i++) { 	
+progress++;
+fprintf(f,"%d %d %d ", toInt(rays[i].x), toInt(rays[i].y), toInt(rays[i].z));
+}
+fprintf(f,"\n");
+if (progress % columns/6 == 0) {
+fprintf(stderr,"\r\nRendering (%d points per face) %5.2f%%",columns*columns,100.*((progress+1)/pow(columns*columns,2)));
+}
+}
+// This is just the top face, trying to confirm it works before doing the other faces.
 // Final file saving code goes here
-//FILE *f = fopen("image.ppm", "w");         // Write image to PPM file.
-//  fprintf(f, "P3\n%d %d\n%d\n", w, h, 255);
-//  for (int i=0; i<columns*columns; i++)
-//    fprintf(f,"%d %d %d ", toInt(c[i].x), toInt(c[i].y), toInt(c[i].z));
+
 }
